@@ -1,0 +1,8 @@
+"Phrases"
+{
+	// a comment line
+	"greeting"	"hallo {player}"
+	"mismatch"	"nur {zwei}"
+	"missing"	""
+	"escaped"	"a\nb"
+}
