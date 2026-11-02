@@ -8,7 +8,18 @@
 # for the module-by-module mapping and FORK_SYNC.md for the Metamod-fork packages.
 
 if(NOT TARGET admin_system_bindings_obj)
-    message(FATAL_ERROR "cs2ac needs the generated admin_system consumer bindings (plugins/admin_system/include/external/plugify/include/admin_system/admin_system.cpp)")
+    set(CS2AC_ADMIN_SYSTEM_BINDINGS_SRC
+            "${CMAKE_SOURCE_DIR}/plugins/admin_system/include/external/plugify/include/admin_system/admin_system.cpp")
+    if(EXISTS "${CS2AC_ADMIN_SYSTEM_BINDINGS_SRC}")
+        add_library(admin_system_bindings_obj OBJECT "${CS2AC_ADMIN_SYSTEM_BINDINGS_SRC}")
+        target_include_directories(admin_system_bindings_obj SYSTEM PUBLIC
+                "${CMAKE_SOURCE_DIR}/plugins/admin_system/include/external/plugify/include"
+                "${CMAKE_SOURCE_DIR}/plugins/admin_system/include"
+                "${CMAKE_SOURCE_DIR}/sdk/include")
+        target_compile_definitions(admin_system_bindings_obj PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
+    else()
+        message(FATAL_ERROR "cs2ac needs the generated admin_system consumer bindings (plugins/admin_system/include/external/plugify/include/admin_system/admin_system.cpp)")
+    endif()
 endif()
 
 set(CS2AC_VERSION "1.1.0")
