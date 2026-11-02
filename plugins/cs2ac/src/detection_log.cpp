@@ -11,8 +11,10 @@
 #include <chrono>
 #include <cstdio>
 #include <ctime>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <utility>
 
 namespace cs2ac::detection_log {
 
@@ -50,12 +52,57 @@ void UtcNow(char* iso, std::size_t isoSize, char* day, std::size_t daySize)
 	std::strftime(day, daySize, "%Y-%m-%d", &utc);
 }
 
-void AppendLine(const char* prefix, const char* day, const std::string& line)
+// The detector hooks (usercmd/setup-move processing, game events) call Write/WriteTelemetry from
+// inside the engine's movement work, so a slow, full or network-mounted log volume must not stall
+// a frame there: the records are queued and appended from the plugin's frame pump. The per-record
+// open/append/close is kept so the files still survive crashes, rotation and an operator moving
+// them.
+struct PendingLine {
+	std::string fileName;
+	std::string line;
+};
+constexpr std::size_t kMaxPendingLines = 256;
+std::deque<PendingLine> g_pending;
+bool g_writeFailedLogged = false;
+bool g_overflowWarned = false;
+
+void FlushPending()
 {
-	std::ofstream file(g_logDirectory / (std::string(prefix) + day + ".jsonl"), std::ios::app | std::ios::binary);
-	if (file) {
-		file << line;
+	std::deque<PendingLine> pending;
+	pending.swap(g_pending);
+	std::string currentFile;
+	std::ofstream file;
+	for (const PendingLine& entry : pending) {
+		if (entry.fileName != currentFile) {
+			if (file.is_open()) {
+				file.close();
+			}
+			file.open(g_logDirectory / entry.fileName, std::ios::app | std::ios::binary);
+			currentFile = entry.fileName;
+			if (!file && !g_writeFailedLogged) {
+				g_writeFailedLogged = true;
+				LogWarning("Cannot append to %s; detection and telemetry evidence is being lost.",
+						   (g_logDirectory / entry.fileName).string().c_str());
+			}
+		}
+		if (file) {
+			file << entry.line;
+		}
 	}
+}
+
+void AppendLine(const char* prefix, const char* day, std::string line)
+{
+	if (g_pending.size() >= kMaxPendingLines) {
+		// The frame pump runs every frame and normally drains this within one; never block the
+		// hook path on file I/O, so the record is dropped and the loss is reported once.
+		if (!g_overflowWarned) {
+			g_overflowWarned = true;
+			LogWarning("The detection log queue is full; some detection and telemetry records were dropped.");
+		}
+		return;
+	}
+	g_pending.push_back({std::string(prefix) + day + ".jsonl", std::move(line)});
 }
 
 struct LineContext {
@@ -84,6 +131,9 @@ LineContext Context()
 void Init()
 {
 	g_ready = false;
+	g_pending.clear();
+	g_writeFailedLogged = false;
+	g_overflowWarned = false;
 	// Keep the returned string alive: a c_str() of the temporary would dangle.
 	const std::string logsDir = plg::GetLogsDir ? std::string(plg::GetLogsDir()) : std::string();
 	if (logsDir.empty()) {
@@ -103,8 +153,18 @@ void Init()
 
 void Shutdown()
 {
+	// Append what the last frames queued before the directory is forgotten.
+	Flush();
+	g_pending.clear();
 	g_ready = false;
 	g_logDirectory.clear();
+}
+
+void Flush()
+{
+	if (g_ready && !g_pending.empty()) {
+		FlushPending();
+	}
 }
 
 bool Ready()
@@ -154,7 +214,7 @@ void Write(const char* detection, PlayerRef* player, u64 steamId, const std::str
 	line += ",\"outcome\":" + detection::JsonString(OutcomeName(outcome));
 	line += ",\"evidence\":" + detection::JsonString(evidenceEnglish.c_str());
 	line += "}\n";
-	AppendLine("detections-", context.day, line);
+	AppendLine("detections-", context.day, std::move(line));
 }
 
 void WriteTelemetry(const char* type, PlayerRef* player, const std::string& fields)
@@ -173,7 +233,7 @@ void WriteTelemetry(const char* type, PlayerRef* player, const std::string& fiel
 	line += ",\"name\":" + detection::JsonString(player->GetName());
 	line += fields;
 	line += "}\n";
-	AppendLine("telemetry-", context.day, line);
+	AppendLine("telemetry-", context.day, std::move(line));
 }
 
 } // namespace cs2ac::detection_log

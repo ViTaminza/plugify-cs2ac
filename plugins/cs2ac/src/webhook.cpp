@@ -35,6 +35,10 @@ constexpr std::size_t maximumQueueSize = 64;
 constexpr std::size_t maximumAvatarCacheSize = 256;
 constexpr uint32_t maximumProfileSize = 64 * 1024;
 constexpr auto kRequestTimeout = std::chrono::seconds(45);
+// The Steam profile XML is only used for the avatar thumbnail. On a host that cannot reach
+// steamcommunity.com it must not hold every Discord report behind it (one report per lookup plus
+// a retry), so the lookup gets a short, separate timeout and stays best-effort.
+constexpr auto kAvatarRequestTimeout = std::chrono::seconds(3);
 
 std::string JsonEscape(std::string_view value)
 {
@@ -665,10 +669,21 @@ void WebhookService::Test()
 
 void WebhookService::OnGameFrame()
 {
-	// Reap a request that never completed (no Steam call-result pump, offline server).
-	if (impl->request != 0 && !impl->responseReady && std::chrono::steady_clock::now() - impl->requestStarted > kRequestTimeout) {
-		impl->CancelRequest();
-		impl->RetryOrDrop(0);
+	// Reap a request that never completed (no Steam call-result pump, offline server). A timed-out
+	// avatar lookup resolves the report with no avatar so the Discord POST goes out with the
+	// configured logo; it is not retried and does not consume the report's retry.
+	if (impl->request != 0 && !impl->responseReady) {
+		const auto now = std::chrono::steady_clock::now();
+		const bool avatar = impl->requestKind == Impl::RequestKind::Avatar;
+		if (now - impl->requestStarted > (avatar ? kAvatarRequestTimeout : kRequestTimeout)) {
+			impl->CancelRequest();
+			if (avatar) {
+				impl->FinishAvatarLookup(std::string());
+				impl->nextAttempt = now;
+			} else {
+				impl->RetryOrDrop(0);
+			}
+		}
 	}
 
 	if (impl->responseReady) {

@@ -15,6 +15,10 @@ void Init();
 void Shutdown();
 bool Ready();
 
+// Appends the records queued by Write/WriteTelemetry. Called from the plugin's frame pump (and by
+// Shutdown), never from the detector hooks that produce them.
+void Flush();
+
 // severity: "ban" | "tempban" | "kick" | "report"; empty when not decided yet.
 void Write(const char* detection, PlayerRef* player, u64 steamId, const std::string& evidenceEnglish, const char* severity,
 		   announce::DetectionOutcome outcome);

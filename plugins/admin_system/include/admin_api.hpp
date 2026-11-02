@@ -452,6 +452,24 @@ public:
 
 	bool IsAdmin(int iSlot) const { return detail::Available() && ::admin_system::IsAdmin(iSlot); }
 
+	// True when the admin record of exactly this SteamID64 has been loaded for the slot, i.e. the
+	// asynchronous admin SELECT answered for that player and IsAdmin/HasPermission/HasFlag are
+	// authoritative for it right now. False while the load is still pending, after a failed load
+	// (the core retries it), for a steamid the current answer was not computed for (a reclaimed
+	// slot), for the console/out-of-range slots, when admin_system is not loaded and - importantly
+	// - when the loaded admin_system predates API 1.1.0 and therefore has no binding slot for this
+	// call: `detail::Available()` only proves that *some* admin_system is loaded.
+	//
+	// A caller MUST treat false as "ask again later" and never as "this player is not an admin":
+	// after true, IsAdmin()/HasPermission() may still answer false (the player really is not an
+	// admin), and that answer is the definitive one.
+	bool IsClientAdminDataReady(int iSlot, uint64_t iSteamID64) const {
+		if (!detail::Available() || __admin_system_IsClientAdminDataReady == nullptr) {
+			return false;
+		}
+		return ::admin_system::IsClientAdminDataReady(iSlot, iSteamID64);
+	}
+
 	const char* GetFlagName(const char* szFlag) {
 		if (!szFlag || !*szFlag) {
 			return "";

@@ -1263,6 +1263,11 @@ private:
 	bool configReloadPending {};
 	bool configLoadFailed {};
 	bool simulatingPhysics {};
+	// Map-lifecycle state machine (the one hudmenu/pisexcompat use): a plugin loaded into a live
+	// map never sees OnMapStart, so the first update with a map name opens the engine gate - but
+	// after an OnMapEnd only a new OnMapStart may re-open it (the client list is torn down).
+	bool mapStartSeen {};
+	bool mapEndSeen {};
 	std::chrono::steady_clock::time_point lastConfigLoad {};
 	std::chrono::steady_clock::time_point configLoadDeadline {};
 	std::string activationError;

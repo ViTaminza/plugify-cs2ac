@@ -427,7 +427,10 @@ struct PendingCvarQuery {
 		std::string name;
 		ClientCvarCallback callback {};
 		void* user {};
-		bool active {};
+		// s2sdk has no way to correlate a reply with its query, and the queries are paced by the
+		// movement service; a player whose round trip is longer than that spacing has two in
+		// flight, so every reply must be accepted (the reply itself carries the cvar name/value).
+		int inFlight {};
 	};
 	std::array<Slot, MAXPLAYERS + 1> slots;
 	std::deque<CvarReply> replies;
@@ -803,6 +806,13 @@ bool PlayerHasPawn(int index)
 	// without letting s2sdk print anything (see PawnPointer).
 	if (index < 1 || index > MAXPLAYERS) {
 		return false;
+	}
+	// The cache is the frame snapshot's, so it is only valid while that snapshot is open. The
+	// usercmd/setup-move and game-event hooks run between frames and used to read the previous
+	// frame's answer (a victim's pawn is already gone when player_death arrives), which made
+	// PlayerTeam/PlayerHealth print s2sdk's "invalid player pawn" warning for a stale "has pawn".
+	if (!g_frameSnapshotActive) {
+		return PawnPointer(index) != nullptr;
 	}
 	std::uint8_t& cached = g_framePawn[static_cast<std::size_t>(index)];
 	if (cached == 0) {
@@ -1379,13 +1389,13 @@ bool QueryClientCvar(int index, const char* name, ClientCvarCallback callback, v
 			return;
 		}
 		auto& pending = g_pendingCvarQueries.slots[static_cast<size_t>(playerSlot)];
-		if (!pending.active || !pending.callback) {
+		if (pending.inFlight <= 0 || !pending.callback) {
 			return;
 		}
+		--pending.inFlight;
 		auto& queue = g_pendingCvarQueries.replies;
 		if (queue.size() >= kMaxPendingCvarReplies) {
 			// Bounded: a reply that cannot be queued is dropped (the next cycle re-queries anyway).
-			pending.active = false;
 			++g_pendingCvarQueries.dropped;
 			return;
 		}
@@ -1397,19 +1407,24 @@ bool QueryClientCvar(int index, const char* name, ClientCvarCallback callback, v
 		reply.callback = pending.callback;
 		reply.user = pending.user;
 		queue.push_back(std::move(reply));
-		pending.active = false;
 	};
 	auto& pending = g_pendingCvarQueries.slots[static_cast<size_t>(slot)];
 	pending.name = name;
 	pending.callback = callback;
 	pending.user = user;
-	pending.active = true;
 	plg::vector<plg::any> data;
 	// The binding documents "a cookie, -1 on failure", but s2sdk 2.18.2's implementation
 	// (PlayerManager::QueryCvarValue) answers a bool: 1 when the query was sent, 0 when the client is
 	// gone or has no net channel. Only a definite success counts as started - a `>= 0` test would
 	// also accept the 0 failure answer.
-	return s2sdk::QueryClientConVar(slot, name, trampoline, data) > 0;
+	if (pending.inFlight < static_cast<int>(kMaxPendingCvarReplies)) {
+		++pending.inFlight;
+	}
+	if (s2sdk::QueryClientConVar(slot, name, trampoline, data) <= 0) {
+		--pending.inFlight;
+		return false;
+	}
+	return true;
 }
 
 bool ServerCvarBool(const char* name, bool defaultValue)
@@ -1609,7 +1624,17 @@ bool TraceLine(const Vector& start, const Vector& end, int ignoreEntityIndex, Tr
 	}
 	result.hit = outHit;
 	result.endPosition = ToVector(outPos);
-	result.hitEntityIndex = outEntHit >= 0 ? s2sdk::EntPointerToPlayerSlot(s2sdk::EntHandleToEntPointer(outEntHit)) + 1 : 0;
+	// s2sdk signals "no hit" only with INVALID_EHANDLE_INDEX (-1). A valid CEntityHandle is
+	// index | serial << 15, so it is a negative int once the serial sets bit 31: a `>= 0` test
+	// would silently drop the hit entity after enough entity churn (core.hpp documents the same
+	// trap).
+	result.hitEntityIndex = 0;
+	if (outEntHit != -1) {
+		const int slot = s2sdk::EntPointerToPlayerSlot(s2sdk::EntHandleToEntPointer(outEntHit));
+		if (slot >= 0 && slot < MAXPLAYERS) {
+			result.hitEntityIndex = slot + 1;
+		}
+	}
 	return true;
 }
 

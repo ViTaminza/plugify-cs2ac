@@ -851,7 +851,11 @@ void DetectionSystem::OnSetupMove(PlayerRef* player, const UsercmdView& command,
 		return;
 	}
 	shots.OnSetupMove(player, command, currentTick);
-	if (settings::IsDetectionEnabled(DetectionType::Triggerbot)) {
+	// The per-tick crosshair trace lives in the triggerbot module and feeds TRIGGER PATTERN too
+	// (which has its own cs2ac_trigger_pattern_enabled switch), so it must run when either switch
+	// is on. The module's own evidence is only consumed from OnPlayerHurt under the Triggerbot
+	// switch, so a disabled Triggerbot cannot report through this call.
+	if (settings::IsDetectionEnabled(DetectionType::Triggerbot) || settings::BoolSetting("cs2ac_trigger_pattern_enabled", true)) {
 		triggerbot.OnSetupMove(player, command, currentTick);
 	}
 	if (settings::IsDetectionEnabled(DetectionType::Aimbot)) {

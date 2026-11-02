@@ -50,6 +50,20 @@ namespace admin_system {
     return __admin_system_IsAdmin(slot);
   }
 
+  using _IsClientAdminDataReady = bool (*)(int32_t, uint64_t);
+}
+extern "C" PLUGIN_API admin_system::_IsClientAdminDataReady __admin_system_IsClientAdminDataReady;
+namespace admin_system {
+  /**
+   * @brief True when the admin data of exactly this player has been loaded for the slot, i.e. the asynchronous admin SELECT answered for `steamid` and IsAdmin/HasPermission/HasFlag are authoritative for it. False for a load that is still pending, for a failed load (the core retries it), for a steamid the current answer was not computed for (a reclaimed/reused slot, an unknown identity), for the console/out-of-range slots and while the core has no database. A false means 'ask again later' and MUST NOT be treated as 'this player is not an admin': after true, IsAdmin/HasPermission/HasFlag may still answer false (the player really is not an admin).
+   * @param slot (int32): Player slot (0..63).
+   * @param steamid (uint64): SteamID64 of the client the caller is asking about (0 = unknown -> false).
+   * @return bool: Whether the admin data for exactly this player is loaded and authoritative.
+   */
+  inline bool IsClientAdminDataReady(int32_t slot, uint64_t steamid) {
+    return __admin_system_IsClientAdminDataReady(slot, steamid);
+  }
+
   using _GetFlagName = plg::string (*)(const plg::string&);
 }
 extern "C" PLUGIN_API admin_system::_GetFlagName __admin_system_GetFlagName;

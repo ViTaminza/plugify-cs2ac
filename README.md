@@ -4,11 +4,13 @@ CS2AC fork v11 (Metamod CS2AC 1.0.14 + packages v3-v11) - server-side anti-cheat
 
 Plugify port (fork) of **CS2AC** by karola3vax (Metamod (C++)).
 Original: https://github.com/karola3vax/CS2AC
-The code was rewritten for Plugify / s2sdk; behaviour follows the original.
+The code was rewritten for Plugify / s2sdk.
 
 ## Requirements
 - [Plugify](https://github.com/untrustedmodders/plugify) with [s2sdk](https://github.com/untrustedmodders/plugify-plugin-s2sdk)
-- Plugify dependencies: s2sdk, polyhook, admin_system (optional)
+- Plugin version: 1.1.0
+- Plugify dependencies: s2sdk (>=2.18.2), polyhook (>=2.5.6), admin_system (>=1.0.0, optional)
+- Self-contained s2sdk integration: uses s2sdk directly, without the pisexcompat library.
 
 ## Installation
 Download `cs2ac-1.1.0.zip` from Releases and extract it into `game/csgo/`.

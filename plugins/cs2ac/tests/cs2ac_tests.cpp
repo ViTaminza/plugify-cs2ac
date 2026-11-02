@@ -394,18 +394,32 @@ void TestConfigParser()
 	CHECK(!settings::IsPlayerWhitelisted(0));
 	settings::SetString("cs2ac_kick_command", "css_kick #{userid} CS2AC: {detection}");
 	CHECK(std::string(settings::GetKickCommand()) == "css_kick #{userid} CS2AC: {detection}");
+	// Only a real change may bump the revision: the once-per-second ConVar resync feeds the same
+	// values back, and a bump makes every detector drop its evidence.
+	const u64 stableRevision = settings::GetRevision();
+	settings::SetDetectionSetting(DetectionType::Bhop, false); // already off
+	settings::SetEnabled(true);                                // already on
+	CHECK(settings::GetRevision() == stableRevision);
+	settings::SetDetectionSetting(DetectionType::Bhop, true);
+	CHECK(settings::GetRevision() == stableRevision + 1);
+	settings::SetEnabled(false);
+	CHECK(settings::GetRevision() == stableRevision + 2);
 	settings::Reset();
 	// A re-Reset installs a fresh table: nothing the previous run changed survives it.
 	CHECK(settings::GetWhitelistCount() == 0);
 	CHECK(settings::IsPluginEnabled());
 	CHECK(settings::IsDetectionEnabled(DetectionType::Bhop));
-	CHECK(std::string(settings::GetKickCommand()) == "css_kick #{userid} CS2AC: {detection}");
+	CHECK(std::string(settings::GetKickCommand()) == "kickid {userid} CS2AC: {detection}");
 	CHECK(std::string(settings::RawValue("cs2ac_aimbot_enabled")) == "1");
 }
 
 void TestCommandTemplate()
 {
 	// cs2ac.cpp CheckCommandTemplate — the findings count drives cs2ac_check_config.
+	// The shipped defaults must pass their own check (an mm_ban template with {userid} is the
+	// "unsafe target" warning case).
+	CHECK(CheckCommandTemplate("cs2ac_punishment_command", "mm_ban {steamid64} 0 CS2AC: {detection}", true) == 0);
+	CHECK(CheckCommandTemplate("cs2ac_kick_command", "kickid {userid} CS2AC: {detection}", false) == 0);
 	CHECK(CheckCommandTemplate("cs2ac_punishment_command", "css_addban {steamid64} 0 CS2AC: {detection}", true) == 0);
 	CHECK(CheckCommandTemplate("cs2ac_kick_command", "css_kick #{userid} CS2AC: {detection}", false) == 0);
 	CHECK(CheckCommandTemplate("cs2ac_kick_command", "", false) == 1);                       // empty disables it
@@ -740,10 +754,12 @@ void TestConVarTables()
 	CHECK(std::strcmp(settings::kConVars[22].name, "cs2ac_auto_update") == 0 && std::strcmp(settings::kConVars[22].defaultValue, "0") == 0);
 	CHECK(std::strcmp(settings::kConVars[23].name, "cs2ac_update_repository") == 0 && settings::kConVars[23].isString);
 	CHECK(std::strcmp(settings::kConVars[24].name, "cs2ac_punishment_command") == 0);
+	// The defaults must be commands this server actually registers: admin_system's mm_ban and the
+	// engine's kickid (the Metamod-era css_addban/css_kick existed nowhere).
 	CHECK(settings::kConVars[24].isString
-		  && std::strcmp(settings::kConVars[24].defaultValue, "css_addban {steamid64} 0 CS2AC: {detection}") == 0);
+		  && std::strcmp(settings::kConVars[24].defaultValue, "mm_ban {steamid64} 0 CS2AC: {detection}") == 0);
 	CHECK(std::strcmp(settings::kConVars[25].name, "cs2ac_kick_command") == 0);
-	CHECK(settings::kConVars[25].isString && std::strcmp(settings::kConVars[25].defaultValue, "css_kick #{userid} CS2AC: {detection}") == 0);
+	CHECK(settings::kConVars[25].isString && std::strcmp(settings::kConVars[25].defaultValue, "kickid {userid} CS2AC: {detection}") == 0);
 	CHECK(std::strcmp(settings::kConVars[36].name, "cs2ac_webhook_url") == 0 && settings::kConVars[36].isString);
 	CHECK(std::strcmp(settings::kConVars[40].name, "cs2ac_language") == 0);
 	CHECK(settings::kConVars[40].isString && std::strcmp(settings::kConVars[40].defaultValue, "en") == 0);

@@ -20,11 +20,15 @@ namespace {
 std::string EscapeChatMarkup(const char* text)
 {
 	// The original prefixed the player name with a raw HUD control byte (0x08) and stripped control
-	// characters; the byte is what colours the name inside the TextMsg parameter.
+	// characters; the byte is what colours the name inside the TextMsg parameter. A brace opens a
+	// colour token in s2sdk's formatter ({gold}, {default}, ...), so a player named "{red}Nick"
+	// must not be able to recolour the line: the formatter's "{{" escape keeps it literal.
 	std::string escaped;
 	for (const unsigned char* current = reinterpret_cast<const unsigned char*>(text ? text : ""); *current; ++current) {
 		if (*current < 0x20 || *current == 0x7f) {
 			escaped += ' ';
+		} else if (*current == '{') {
+			escaped += "{{";
 		} else {
 			escaped += static_cast<char>(*current);
 		}
@@ -87,10 +91,20 @@ f64 AnnounceNowSeconds()
 // down).
 void SendDetectionHtml(const char* message, int duration)
 {
-	if (!__s2sdk_PrintCentreHtmlAll || !engine::GameReady()) {
+	if (!__s2sdk_PrintCentreHtml || !engine::GameReady()) {
 		return;
 	}
-	s2sdk::PrintCentreHtmlAll(message ? message : "<font></font>", duration);
+	// s2sdk 3.0.2's PrintCentreHtmlAll creates an IGameEvent and never frees it, so every one of
+	// the 51 re-sends per detection leaked an event; the per-slot PrintCentreHtml frees its event.
+	// Broadcasting per player keeps the original's output without the leak. Bots and SourceTV have
+	// no legacy game-event listener to fire at.
+	const char* text = message ? message : "<font></font>";
+	for (int index = 1; index <= MAXPLAYERS; ++index) {
+		if (!engine::PlayerInGame(index) || engine::PlayerFakeClient(index) || engine::PlayerCSTV(index)) {
+			continue;
+		}
+		s2sdk::PrintCentreHtml(index - 1, text, duration);
+	}
 }
 
 void SendDetectionHtmlTo(int slot, const char* message, int duration)

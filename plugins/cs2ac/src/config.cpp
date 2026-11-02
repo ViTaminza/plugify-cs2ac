@@ -49,8 +49,10 @@ const ConVarSpec kConVars[kConVarCount] = {
 	{"cs2ac_auto_update", "0", "Automatically download verified stable updates from the configured fork", false},
 	{"cs2ac_update_repository", "",
 	 "GitHub owner/repo used for automatic updates; empty disables updates and keeps fork builds self-hosted", true},
-	{"cs2ac_punishment_command", "css_addban {steamid64} 0 CS2AC: {detection}", "Command run for permanent-ban detections", true},
-	{"cs2ac_kick_command", "css_kick #{userid} CS2AC: {detection}", "Command run for kick-only detections", true},
+	{"cs2ac_punishment_command", "mm_ban {steamid64} 0 CS2AC: {detection}",
+	 "Command run for permanent-ban detections (admin_system's mm_ban <userid|steamid> <seconds> <reason>)", true},
+	{"cs2ac_kick_command", "kickid {userid} CS2AC: {detection}",
+	 "Command run for kick-only detections (the engine's kickid <userid> <reason>)", true},
 	{"cs2ac_weak_signal_policy", "report",
 	 "Punishment for movement, integrity, behavioural and settings findings: report (default, no kick) or kick", true},
 	{"cs2ac_ban_detections", "AIMBOT,AIMLOCK,SILENTAIM,BACKTRACK,DLL INJECTION",
@@ -158,8 +160,8 @@ struct Configuration {
 	std::string joinWatermark {"0"};
 	std::string automaticUpdates {"0"};
 	std::string updateRepository;
-	std::string punishmentCommand {"css_addban {steamid64} 0 CS2AC: {detection}"};
-	std::string kickCommand {"css_kick #{userid} CS2AC: {detection}"};
+	std::string punishmentCommand {"mm_ban {steamid64} 0 CS2AC: {detection}"};
+	std::string kickCommand {"kickid {userid} CS2AC: {detection}"};
 	std::string weakSignalPolicy {"report"};
 	std::string banDetections {"AIMBOT,AIMLOCK,SILENTAIM,BACKTRACK,DLL INJECTION"};
 	std::string kickDetections {"TRIGGER PATTERN,MOUSE MISMATCH,ANTIAIM"};
@@ -473,6 +475,12 @@ void SetDetectionSetting(DetectionType detection, bool value)
 	}
 	const auto index = static_cast<std::size_t>(detection);
 	if (index < static_cast<std::size_t>(DetectionType::Count)) {
+		// Only a real change may bump the revision: the once-per-second ConVar resync calls this
+		// with the same value, and RefreshSettings resets every detector's evidence on each bump.
+		const std::string& current = configuration->detectionSettings[index];
+		if (current == (value ? "1" : "0")) {
+			return;
+		}
 		configuration->detectionSettings[index] = value ? "1" : "0";
 		BumpRevision();
 	}
@@ -481,6 +489,10 @@ void SetDetectionSetting(DetectionType detection, bool value)
 void SetEnabled(bool value)
 {
 	if (configuration) {
+		const std::string& current = configuration->enabled;
+		if (current == (value ? "1" : "0")) {
+			return;
+		}
 		configuration->enabled = value ? "1" : "0";
 		BumpRevision();
 	}

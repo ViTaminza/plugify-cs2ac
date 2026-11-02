@@ -20,6 +20,8 @@ admin_system::_HasFlag __admin_system_HasFlag = nullptr;
 
 admin_system::_IsAdmin __admin_system_IsAdmin = nullptr;
 
+admin_system::_IsClientAdminDataReady __admin_system_IsClientAdminDataReady = nullptr;
+
 admin_system::_GetFlagName __admin_system_GetFlagName = nullptr;
 
 admin_system::_GetPermissionsByFlag __admin_system_GetPermissionsByFlag = nullptr;

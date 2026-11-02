@@ -158,7 +158,7 @@ Status: **done** = ported, built and covered by tests; **n/a** = deliberately no
 | T.2 | `assets/cs2ac.cfg` replaced with the fork cfg | done |
 | T.3 | Version 1.1.0; manifest description names the fork v11 and the new modules | done |
 | T.4 | 49 string/bool + 19 debug + 22 int/float convars registered with the fork's names/defaults/descriptions | done |
-| T.5 | Unit tests: list/severity policy, stream/combo/mass-guard/repeat-ban windows, JSON escaping, tick render/interp/dip/fingerprint/buckets, SILENTAIM 0.25°/camera weights/buckets, trigger-pattern buckets/median, RCS correlation/qualification/share, usercmd tick-integrity wire fields; `cs2ac_tests` 936 checks, 0 failures | done |
+| T.5 | Unit tests: list/severity policy, stream/combo/mass-guard/repeat-ban windows, JSON escaping, tick render/interp/dip/fingerprint/buckets, SILENTAIM 0.25°/camera weights/buckets, trigger-pattern buckets/median, RCS correlation/qualification/share, usercmd tick-integrity wire fields; `cs2ac_tests` 941 checks, 0 failures | done |
 
 ## Known gaps / deliberate deviations
 
@@ -193,3 +193,9 @@ Status: **done** = ported, built and covered by tests; **n/a** = deliberately no
    the fork's `steady_clock::time_point` deques so the window rules live in engine-free
    `decisions.cpp` and are unit-tested; the semantics (windows, thresholds, dedupe, ignore lists)
    are the fork's.
+10. **Autostrafe jump statistics are not fed** — `MovementDetectionService::OnJumpFinish` (the
+    fork's `jumps.cpp` rule) has no caller in the port: `MovementOnGameFrame` drives the frame
+    sampler, the usercmd stream and the landing checks but never builds a `JumpStats`, so only the
+    yaw-accel optimizer rule of AUTOSTRAFE can fire. The jump-statistics rule is left in place but
+    is unreachable; wiring it to a takeoff/landing tracker is deferred (would need air-time,
+    strafe-direction and gain tracking that the port does not collect).

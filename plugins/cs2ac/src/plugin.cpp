@@ -230,6 +230,8 @@ s2sdk::ResultType Plugin::OnCommand(int32_t playerSlot, s2sdk::ConCommandContext
 
 void Plugin::OnMapInit()
 {
+	mapStartSeen = true;
+	mapEndSeen = false;
 	if (loaded) {
 		ResetRuntime();
 		Log("A new map is ready. Detection evidence started fresh.");
@@ -238,6 +240,8 @@ void Plugin::OnMapInit()
 
 void Plugin::OnMapShutdown()
 {
+	mapStartSeen = false;
+	mapEndSeen = true;
 	if (loaded) {
 		ResetRuntime();
 		Log("The map ended. Detection evidence was cleared.");
@@ -550,8 +554,10 @@ void Plugin::SyncSettingsFromConVars()
 				settings::SetString(spec.name, current.c_str());
 			}
 		} else if (!current.empty()) {
-			const bool enabled = current == "1" || EqualsIgnoreCase(current, "true") || EqualsIgnoreCase(current, "yes");
-			if (current != known) {
+			// The engine prints a bool ConVar as "true"/"false", while RawValue stores the
+			// configured "1"/"0": a raw string compare would report a change every single pass.
+			const bool enabled = cvar::BoolFromString(current.c_str());
+			if (enabled != cvar::BoolFromString(known.c_str())) {
 				settings::SetBool(spec.name, enabled);
 			}
 		}
@@ -568,12 +574,16 @@ void Plugin::SyncSettingsFromConVars()
 	}
 	for (const auto& spec : settings::kNumericConVars) {
 		const std::string current = engine::ServerCvarString(spec.name);
-		if (current.empty() || current == settings::RawValue(spec.name)) {
+		if (current.empty()) {
 			continue;
 		}
 		if (spec.isFloat) {
-			settings::SetFloat(spec.name, std::strtof(current.c_str(), nullptr));
-		} else {
+			// The engine prints floats with "%f" and RawValue stores "%g": compare the values.
+			const f32 value = std::strtof(current.c_str(), nullptr);
+			if (value != std::strtof(settings::RawValue(spec.name), nullptr)) {
+				settings::SetFloat(spec.name, value);
+			}
+		} else if (std::atoi(current.c_str()) != std::atoi(settings::RawValue(spec.name))) {
 			settings::SetInt(spec.name, std::atoi(current.c_str()));
 		}
 	}
@@ -673,6 +683,24 @@ void Plugin::OnUpdate()
 		if (!loaded) {
 			return;
 		}
+		// A plugin loaded into a live map (`plg load`/`plg reload` between map changes) never saw
+		// OnMapStart, so without this the engine gate stays closed and it is inert until the next
+		// map. The host pumps updates from ServerPostSimulate, so an update with a map name means a
+		// map is running; after an OnMapEnd only a new OnMapStart re-opens the gate.
+		if (!engine::GameReady() && (mapStartSeen || !mapEndSeen) && __s2sdk_GetCurrentMap) {
+			plg::string mapName;
+			try {
+				mapName = s2sdk::GetCurrentMap();
+			} catch (...) {
+			}
+			if (!mapName.empty()) {
+				engine::OnMapStart();
+				mapStartSeen = true;
+				mapEndSeen = false;
+				ResetRuntime();
+				Log("The plugin was loaded into a running map. Detection evidence started fresh.");
+			}
+		}
 		// Bans are executed here, outside every per-client hook: admin_system's AddPlayerPunishment
 		// disconnects the client synchronously (fork admin_bridge).
 		admin_bridge::ProcessQueue();
@@ -690,6 +718,9 @@ void Plugin::OnUpdate()
 			lastCvarCycle = now;
 			SyncSettingsFromConVars();
 		}
+		// Detection and telemetry lines are queued by the hook paths and appended here, outside
+		// the engine's movement processing (a slow log volume must not stall a game frame).
+		detection_log::Flush();
 	} catch (...) {
 		// OnPluginUpdate is called from the module; nothing may unwind through it.
 	}
@@ -1177,6 +1208,34 @@ void Plugin::CheckConfig()
 		findings += CheckCommandTemplate("cs2ac_kick_command", settings::GetKickCommand(), false);
 	} else if (settings::GetKickCommand() && *settings::GetKickCommand()) {
 		ConsoleMessage("Note: cs2ac_kick_command is configured, but weak findings are report-only. Set cs2ac_weak_signal_policy to kick to use it.");
+	}
+	// A template's first word is the command the engine will run. A name that no loaded plugin or
+	// the engine registers (the Metamod-era css_kick/css_addban on this server) or a typo would
+	// otherwise only be noticed when a detection fires.
+	if (__s2sdk_GetAllConCommands) {
+		try {
+			const plg::vector<plg::string> commands = s2sdk::GetAllConCommands(s2sdk::ConVarFlag::None);
+			auto checkCommandName = [&](const char* settingName, const char* commandTemplate) {
+				if (!commandTemplate || !*commandTemplate) {
+					return;
+				}
+				std::string_view name(commandTemplate);
+				const std::size_t end = name.find_first_of(" \t");
+				name = name.substr(0, end == std::string_view::npos ? name.size() : end);
+				for (const plg::string& command : commands) {
+					if (EqualsIgnoreCase(command.c_str(), name)) {
+						return;
+					}
+				}
+				ConsoleMessage("Review %s: '%s' is not a registered console command on this server, so this punishment will do nothing.",
+							   settingName, SanitizeConsoleText(std::string(name).c_str()).c_str());
+				++findings;
+			};
+			checkCommandName("cs2ac_punishment_command", settings::GetPunishmentCommand());
+			checkCommandName("cs2ac_kick_command", settings::GetKickCommand());
+		} catch (...) {
+			ConsoleMessage("The punishment command names were not checked: the s2sdk command list is unavailable.");
+		}
 	}
 	if (!WebhookService::IsValidUrl(settings::GetWebhookUrl())) {
 		ConsoleMessage("Review cs2ac_webhook_url: it is not a Discord webhook URL.");
